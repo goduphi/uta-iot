@@ -192,7 +192,11 @@ void rfSetMode(mode m)
         // Power up the device and put it in primary receive mode
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | PRIM_RX | EN_CRC);
-        chipEnable();
+        // Clear the receive buffer
+        rfCsOff();
+        writeSpi1Data(FLUSH_RX);
+        readSpi1Data();
+        rfCsOn();
         break;
     case TX:
         // Transmit only requires DPL for pipe 0 to be enabled
@@ -208,8 +212,13 @@ void rfSetMode(mode m)
         // Power up the device
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | EN_CRC);
+        rfCsOff();
+        writeSpi1Data(FLUSH_RX);
+        readSpi1Data();
+        rfCsOn();
         break;
     }
+    chipEnable();
 }
 
 void initNrf24l01()
@@ -285,7 +294,4 @@ void rfSendBuffer(uint8_t buffer[], uint32_t nBytes)
     rfCsOn();
 
     chipEnable();
-    // Pulse CE for more than 10us
-    _delay_cycles(20000);
-    chipDisable();
 }
