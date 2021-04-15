@@ -160,15 +160,18 @@ void rfSetAddress(uint8_t pipe, uint32_t address)
     rfCsOn();
 }
 
-void rfSetMode(mode m, uint8_t frequency)
+void rfSetFrequency(uint8_t frequency)
 {
     // This is an error as the frequency cannot be more than 2.525GHz
     if(frequency > 125)
         return;
-
-    chipDisable();
     // Frequency = 2400 + RF_CH [MHz]
     rfWriteRegister(RF_CH, frequency);
+}
+
+void rfSetMode(mode m)
+{
+    chipDisable();
     // 1. Use dynamic payload length
     rfWriteRegister(FEATURE, EN_DPL);
     rfWriteRegister(ACTIVATE, 0x73);
@@ -189,7 +192,6 @@ void rfSetMode(mode m, uint8_t frequency)
         // Power up the device and put it in primary receive mode
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | PRIM_RX | EN_CRC);
-        rfCsOff();
         chipEnable();
         break;
     case TX:

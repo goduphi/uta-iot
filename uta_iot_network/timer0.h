@@ -12,6 +12,10 @@
 #include <stdbool.h>
 #include "tm4c123gh6pm.h"
 
-void initTimer0(uint32_t loadValue);
+void initTimer0();
+void startTimer0();
+void stopTimer0();
+void setTimerLoadValue(uint32_t loadValue);
+void clearTimer0InterruptFlag();
 
 #endif /* TIMER0_H_ */
