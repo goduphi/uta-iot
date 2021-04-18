@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include "nrf24l01.h"
 #include "protocol.h"
+#include "device.h"
 
 #define PREAMBLE            0xAA
 #define BRIDGE_ADDRESS      0x42
@@ -38,6 +39,48 @@ bool isSync(uint8_t* buffer)
 {
     packetHeader* pH = (packetHeader*)buffer;
     if(pH->preamble == PREAMBLE && pH->from == BRIDGE_ADDRESS && pH->messageType == (uint8_t)SYNC)
+        return true;
+    return false;
+}
+
+void sendJoinRequest(uint8_t* buffer, uint8_t nBytes, uint8_t deviceId)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = deviceId;
+    pH->to = 0xFF;
+    pH->messageType = (uint8_t)JOIN_REQ;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    rfSendBuffer((uint8_t*)pH, 7);
+}
+
+bool isJoinRequest(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->messageType == (uint8_t)JOIN_REQ)
+        return true;
+    return false;
+}
+
+void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotNumber)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = BRIDGE_ADDRESS;
+    pH->to = id;
+    pH->messageType = (uint8_t)JOIN_RESP;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    uint8_t* data = buffer + 7;
+    data[0] = slotNumber;
+    rfSendBuffer((uint8_t*)pH, 7 + nBytes);
+}
+
+bool isJoinResponse(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->to == getDeviceId() && pH->messageType == (uint8_t)JOIN_RESP)
         return true;
     return false;
 }

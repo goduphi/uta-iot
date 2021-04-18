@@ -12,12 +12,15 @@
 #include "clock.h"
 #include "uart0.h"
 #include "network.h"
+#include "device.h"
 
 int main(void)
 {
     initSystemClockTo40Mhz();
     initUart0();
     setUart0BaudRate(115200, 40e6);
+
+    setDeviceId(3);
 
     /*
      * Register the callback here

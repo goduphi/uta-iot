@@ -5,9 +5,6 @@
  *      Author: Sarker Nadir Afridi Azmi
  */
 
-#ifndef JOINBUTTON_C_
-#define JOINBUTTON_C_
-
 #include "joinNetwork.h"
 
 #define PUSH_BUTTON     PORTF,4
@@ -23,5 +20,3 @@ bool joinNetwork(void)
 {
     return !getPinValue(PUSH_BUTTON);
 }
-
-#endif /* JOINBUTTON_C_ */

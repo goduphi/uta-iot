@@ -46,6 +46,7 @@ typedef struct _packetHeader    // 7 bytes + Data bytes
     uint8_t messageType;        // (1 byte) Type of message (from enum messageType)
     uint8_t length;             // (1 byte) Length of packet header
     uint16_t checksum;          // (2 bytes) Checksum of packet header
+    uint8_t data[0];
 } packetHeader;
 
 //----------------------------
@@ -54,6 +55,10 @@ typedef struct _packetHeader    // 7 bytes + Data bytes
 
 void sendSync(uint8_t* buffer, uint8_t nBytes);
 bool isSync(uint8_t* buffer);
+void sendJoinRequest(uint8_t* buffer, uint8_t nBytes, uint8_t deviceId);
+bool isJoinRequest(uint8_t* buffer);
+void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotNumber);
+bool isJoinResponse(uint8_t* buffer);
 
 /*
 void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
