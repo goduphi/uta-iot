@@ -55,12 +55,14 @@ typedef struct _packetHeader    // 7 bytes + Data bytes
 
 void sendSync(uint8_t* buffer, uint8_t nBytes);
 bool isSync(uint8_t* buffer);
-
-/*
 void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
-void getChecksum(uint32_t sum);
+uint32_t getChecksum(uint32_t sum);
 void calcProtocolChecksum(packetHeader *packet);
-*/
+uint16_t htons(uint16_t value);
+uint32_t htonl(uint32_t value);
+bool isProtocol(packetHeader *p);
+uint8_t* getProtocolData(packetHeader *p);
+
 
 
 
