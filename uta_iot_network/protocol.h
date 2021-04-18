@@ -46,6 +46,7 @@ typedef struct _packetHeader    // 7 bytes + Data bytes
     uint8_t messageType;        // (1 byte) Type of message (from enum messageType)
     uint8_t length;             // (1 byte) Length of packet header
     uint16_t checksum;          // (2 bytes) Checksum of packet header
+    uint8_t data[0];            // (X bytes) Data payload of packet
 } packetHeader;
 
 //----------------------------
