@@ -42,8 +42,7 @@ bool isSync(uint8_t* buffer)
     return false;
 }
 
-/*
- * FIXME still working on checksum
+ // FIXME still working on checksum
 void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum)
 {
     uint8_t* pData = (uint8_t*)data;
@@ -65,7 +64,7 @@ void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum)
 }
 
 
-void getChecksum(uint32_t sum)
+uint32_t getChecksum(uint32_t sum)
 {
     uint16_t result;
     // this is based on rfc1071
@@ -87,7 +86,7 @@ void calcProtocolChecksum(packetHeader *packet)
     packet->checksum = getChecksum(sum);
 }
 
-*/
+
 // Converts from host to network order and vice versa
 // smaller version
 uint16_t htons(uint16_t value)
@@ -104,4 +103,58 @@ uint32_t htonl(uint32_t value)
 }
 
 #define ntohl htonl
+
+// Determines if packet is using Custom Protocol (BAD VERSION BUT WORKS FOR NOW)
+// this way doesn't use the checksum, only looks for preamble field
+bool isProtocol(packetHeader *p)
+{
+    packetHeader* pH = (packetHeader*)p;
+    bool ok;
+    ok = (pH->preamble == PREAMBLE);            // check Preamble field to make sure it's Custom Protocol
+
+    return ok;
+}
+
+// Gets pointer to Protocol payload of frame
+uint8_t* getProtocolData(packetHeader *p)
+{
+    packetHeader* pH = (packetHeader*)p;
+    return p->data;
+}
+
+/*
+ * ORIGINAL WAY OF DETREMINING CUSTOM PROTOCOL
+ * probably better to use once checksum works
+ *
+bool isProtocol(packetHeader *p)
+{
+    packetHeader* pH = (packetHeader*)p->data;
+    uint8_t packetHeaderLength = (pH->preamble & 0xF) * 4;
+    bool ok;
+    uint16_t tmp16;
+    uint32_t sum = 0;
+    ok = (pH->preamble == 0xAA);            // check to make sure it's our custom Protocol
+
+    if (ok)
+    {
+        // 32-bit sum over pseudo-header
+        sumWords(p, (7 + pLength), &sum);
+        tmp16 = p->preamble;
+        tmp16 = htons(tmp16);
+        sumWords(&tmp16, 1, &sum);
+        // add udp header and data
+        tmp16 = htons(pLength);
+        sumWords(&tmp16, 1, &sum);
+        sumWords(p, pLength, &sum);
+        ok = (getChecksum(sum) == 0);
+    }
+
+    // calculate checksum and see if correct
+
+    // preamble and checksum check to determine if valid Protocol packet
+    return ok;
+}
+*/
+
+
 
