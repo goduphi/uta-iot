@@ -12,7 +12,10 @@
 #include "nrf24l01.h"
 #include "timer0.h"
 #include "uart0.h"
-#include "devices.h"
+#include "joinNetwork.h"
+#include "wait.h"
+#include "protocol.h"
+#include "utils.h"
 
 #define DEBUG
 
@@ -20,23 +23,56 @@
     #include <stdio.h>
 #endif
 
-#define TX_LED      PORTF,1
-#define RX_LED      PORTF,3
+#define TX_LED              PORTF,1
+#define JOIN_LED            PORTF,2
+#define RX_LED              PORTF,3
+
+#define MAX_DEVICES         10
+#define MAX_PACKET_SIZE     20
 
 uint8_t timeIndex = 0;
-uint32_t slottedTimes[] = {100, 40e6};
-bool bridgeMode = true;
+uint32_t slottedTimes[] = {20e6, 40e6, 120e6, 40e6};
+bool accessSlot = false;
+bool letJoin = false;
+bool bridgeMode = false;
+
+// All registered send callback functions go here
+void (*sendCallbacks[MAX_DEVICES])(uint8_t*, uint8_t);
+uint8_t sendCallbackIndex = 0;
+
+uint8_t packet[MAX_PACKET_SIZE];
+uint8_t packetLength = 0;
+
+uint8_t sendBuffer[MAX_PACKET_SIZE];
 
 // Temporary variables
 // These will be removed later
 char out[50];
-uint8_t sync[] = {0xCC};
-uint8_t tmp[] = {0x12};
 
+/*
+ * This is just for reference
+    if(!bridgeMode && !dev2)
+    {
+        putsUart0("Transmitting ...\n");
+        rfSetMode(TX);
+        rfSendBuffer(tmp, sizeof(tmp));
+        waitMicrosecond(130);
+        rfSetMode(RX);
+        timeIndex = 0;
+        stopTimer0();
+        clearTimer0InterruptFlag();
+        return;
+    }
+*/
+
+/*
+ * Private functions
+ */
 void initHw()
 {
     enablePort(PORTF);
     selectPinPushPullOutput(TX_LED);
+    selectPinPushPullOutput(JOIN_LED);
     selectPinPushPullOutput(RX_LED);
 }
 
@@ -52,32 +88,43 @@ void timer0Isr()
     switch(timeIndex)
     {
     case 0:
+        // Sync slot, size = 0
         if(bridgeMode)
-            // Send the sync message
-            rfSendBuffer(sync, 1);
+            sendSync(packet, 0);
         break;
     case 1:
+        // Down Link slot
         break;
     case 2:
+        // Access Slot
         if(bridgeMode)
-            //rfSetMode(RX);
+        {
+            rfSetMode(RX);
+            accessSlot = true;
+        }
+        else
+        {
+            rfSetMode(TX);
+        }
         break;
     case 3:
-        /*
-        if(!bridgeMode)
+        if(bridgeMode)
         {
-            putsUart0("Transmitting data ...\n");
-            rfSetMode(TX);
-            rfSendBuffer(tmp, 1);
-            rfSetMode(RX);
+            accessSlot = false;
+            letJoin = false;
+            setPinValue(JOIN_LED, 0);
         }
-        */
         break;
     default:
         break;
     }
 
-    if(timeIndex < 2)
+    if(timeIndex > 2)
+    {
+        sendCallbacks[timeIndex](sendBuffer, packetLength);
+    }
+
+    if(timeIndex < 4)
     {
         stopTimer0();
         setTimerLoadValue(slottedTimes[timeIndex]);
@@ -88,11 +135,41 @@ void timer0Isr()
     if(timeIndex == MAX_DEVICES)
     {
         if(bridgeMode)
-            //rfSetMode(TX);
+            rfSetMode(TX);
+        else
+            rfSetMode(RX);
         timeIndex = 0;
     }
 
     clearTimer0InterruptFlag();
+}
+
+void defaultSendCallback(uint8_t* data, uint8_t length)
+{
+}
+
+void initSendCallbacks()
+{
+    uint8_t i = 0;
+    for(i = 0; i < MAX_DEVICES; i++)
+    {
+        sendCallbacks[i] = defaultSendCallback;
+    }
+}
+
+/*
+ * Public functions
+ */
+void registerSendCallback(void (*s)(uint8_t*, uint8_t), uint8_t* data, uint8_t length)
+{
+    if(sendCallbackIndex >= MAX_DEVICES)
+    {
+        putsUart0("Cannot add more devices.\n");
+        return;
+    }
+    sendCallbacks[sendCallbackIndex++ + 3] = s;
+    copyArray(data, sendBuffer, length);
+    packetLength = length;
 }
 
 void initNetwork()
@@ -101,15 +178,15 @@ void initNetwork()
     initNrf24l01();
     rfSetAddress(RX_ADDR_P0, 0xABC);
     rfSetAddress(TX_ADDR, 0xABC);
-    rfSetFrequency(37);
-
+    initJoinNetwork();
     initTimer0();
-    setTimerLoadValue(0);
+    initSendCallbacks();
 
     if(bridgeMode)
     {
         putsUart0("TX Mode");
         rfSetMode(TX);
+        setTimerLoadValue(0);
         startTimer0();
     }
     else
@@ -120,23 +197,50 @@ void initNetwork()
 
     while(true)
     {
-        if(rfIsDataAvailable())
+        // Keep on polling for the push button press
+        // If pressed, let the user join for a short period of time
+        if(joinNetwork())
         {
-            putsUart0("Received data ...\n");
-            uint8_t data[10] = {0};
-            uint32_t n = rfReceiveBuffer(data);
-
-            if(data[0] == 0xCC)
+            if(bridgeMode && accessSlot)
             {
-                setTimerLoadValue(0);
-                startTimer0();
-                sprintf(out, "Sync message (%d byte(s)): %x\n", n, data[0]);
-                putsUart0(out);
+                putsUart0("Press join button to pair.\n");
+                letJoin = true;
+                setPinValue(JOIN_LED, 1);
             }
             else
             {
-                sprintf(out, "Data (%d byte(s)): %x\n", n, data[0]);
-                putsUart0(out);
+                putsUart0("Transmitting ...\n");
+                // Send device information
+                uint8_t id[] = {0x69};
+                rfSendBuffer(id, 1);
+            }
+            waitMicrosecond(1000000);
+        }
+
+        if(rfIsDataAvailable())
+        {
+            uint32_t n = rfReceiveBuffer(packet);
+            sprintf(out, "Received %d byte(s) of data ...\n", n);
+            putsUart0(out);
+
+            if(n > 0)
+            {
+                if(letJoin)
+                {
+                    // Store device data
+                    sprintf(out, "Received new device: %x\n", packet[0]);
+                    putsUart0(out);
+                }
+
+                if(isSync(packet))
+                {
+                    timeIndex = 0;
+                    setTimerLoadValue(0);
+                    startTimer0();
+#ifdef DEBUG
+                    putsUart0("Received sync.\n");
+#endif
+                }
             }
         }
     }

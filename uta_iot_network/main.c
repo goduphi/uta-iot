@@ -18,6 +18,10 @@ int main(void)
     initSystemClockTo40Mhz();
     initUart0();
     setUart0BaudRate(115200, 40e6);
+
+    /*
+     * Register the callback here
+     */
+
     initNetwork();
-    while(true);
 }

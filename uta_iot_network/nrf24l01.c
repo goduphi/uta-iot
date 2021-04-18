@@ -21,6 +21,7 @@
 #include "gpio.h"
 #include "spi1.h"
 #include "nrf24l01.h"
+#include "wait.h"
 
 #define CSN                 PORTD,1
 #define CHIP_ENABLE         PORTD,6
@@ -188,15 +189,11 @@ void rfSetMode(mode m)
         // 2. Use dynamic payload length
         // Auto acknowledgement is set for all pipes by default
         // Enable DPL for all available pipes 0 - 5
-        rfWriteRegister(DYNPD, 0x1F);
+        rfWriteRegister(DYNPD, 0x3F);
         // Power up the device and put it in primary receive mode
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | PRIM_RX | EN_CRC);
-        // Clear the receive buffer
-        rfCsOff();
-        writeSpi1Data(FLUSH_RX);
-        readSpi1Data();
-        rfCsOn();
+        chipEnable();
         break;
     case TX:
         // Transmit only requires DPL for pipe 0 to be enabled
@@ -212,13 +209,8 @@ void rfSetMode(mode m)
         // Power up the device
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | EN_CRC);
-        rfCsOff();
-        writeSpi1Data(FLUSH_RX);
-        readSpi1Data();
-        rfCsOn();
         break;
     }
-    chipEnable();
 }
 
 void initNrf24l01()
@@ -236,7 +228,8 @@ void initNrf24l01()
  */
 bool rfIsDataAvailable()
 {
-    return (((rfReadRegister(STATUS) >> 1) & RX_P_NO) != RX_P_NO);
+    // This only checks if pipe 0 received data
+    return (((rfReadRegister(STATUS) >> 1) & RX_P_NO) == 0);
 }
 
 uint32_t rfReceiveBuffer(uint8_t buffer[])
@@ -294,4 +287,7 @@ void rfSendBuffer(uint8_t buffer[], uint32_t nBytes)
     rfCsOn();
 
     chipEnable();
+    // Pulse CE for more than 10us
+    waitMicrosecond(12);
+    chipDisable();
 }

@@ -10,15 +10,37 @@
  * Stack Size: 4096
  */
 
-#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "nrf24l01.h"
 #include "protocol.h"
 
+#define PREAMBLE            0xAA
+#define BRIDGE_ADDRESS      0x42
 
 //----------------------------
 // Protocol Functions
 //----------------------------
+
+void sendSync(uint8_t* buffer, uint8_t nBytes)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = BRIDGE_ADDRESS;
+    pH->to = 0xFF;
+    pH->messageType = (uint8_t)SYNC;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    rfSendBuffer((uint8_t*)pH, 7);
+}
+
+bool isSync(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->from == BRIDGE_ADDRESS && pH->messageType == (uint8_t)SYNC)
+        return true;
+    return false;
+}
 
 /*
  * FIXME still working on checksum
