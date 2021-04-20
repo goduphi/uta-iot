@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include "nrf24l01.h"
 #include "protocol.h"
+#include "device.h"
 
 #define PREAMBLE            0xAA
 #define BRIDGE_ADDRESS      0x42
@@ -41,6 +42,76 @@ bool isSync(uint8_t* buffer)
         return true;
     return false;
 }
+
+void sendJoinRequest(uint8_t* buffer, uint8_t nBytes, uint8_t deviceId)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = deviceId;
+    pH->to = 0xFF;
+    pH->messageType = (uint8_t)JOIN_REQ;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    rfSendBuffer((uint8_t*)pH, 7);
+}
+
+bool isJoinRequest(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->messageType == (uint8_t)JOIN_REQ)
+        return true;
+    return false;
+}
+
+void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotNumber)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = BRIDGE_ADDRESS;
+    pH->to = id;
+    pH->messageType = (uint8_t)JOIN_RESP;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    uint8_t* data = buffer + 7;
+    data[0] = slotNumber;
+    rfSendBuffer((uint8_t*)pH, 7 + nBytes);
+}
+
+bool isJoinResponse(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->to == getDeviceId() && pH->messageType == (uint8_t)JOIN_RESP)
+        return true;
+    return false;
+}
+
+void sendPingRequest(uint8_t* buffer, uint8_t deviceId)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = BRIDGE_ADDRESS;
+    pH->to = deviceId;
+    pH->messageType = (uint8_t)PING_REQ;
+    pH->length = 0;
+    pH->checksum = 0;
+    rfSendBuffer((uint8_t*)pH, 7);
+}
+
+bool isPingRequest(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->to == getDeviceId() && pH->messageType == (uint8_t)PING_REQ)
+        return true;
+    return false;
+}
+
+// Gets pointer to Protocol payload of frame
+uint8_t* getProtocolData(packetHeader *p)
+{
+    packetHeader* pH = (packetHeader*)p;
+    return p->data;
+}
+
 
  // FIXME still working on checksum
 void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum)
@@ -104,57 +175,6 @@ uint32_t htonl(uint32_t value)
 
 #define ntohl htonl
 
-// Determines if packet is using Custom Protocol (BAD VERSION BUT WORKS FOR NOW)
-// this way doesn't use the checksum, only looks for preamble field
-bool isProtocol(packetHeader *p)
-{
-    packetHeader* pH = (packetHeader*)p;
-    bool ok;
-    ok = (pH->preamble == PREAMBLE);            // check Preamble field to make sure it's Custom Protocol
-
-    return ok;
-}
-
-// Gets pointer to Protocol payload of frame
-uint8_t* getProtocolData(packetHeader *p)
-{
-    packetHeader* pH = (packetHeader*)p;
-    return p->data;
-}
-
-/*
- * ORIGINAL WAY OF DETREMINING CUSTOM PROTOCOL
- * probably better to use once checksum works
- *
-bool isProtocol(packetHeader *p)
-{
-    packetHeader* pH = (packetHeader*)p->data;
-    uint8_t packetHeaderLength = (pH->preamble & 0xF) * 4;
-    bool ok;
-    uint16_t tmp16;
-    uint32_t sum = 0;
-    ok = (pH->preamble == 0xAA);            // check to make sure it's our custom Protocol
-
-    if (ok)
-    {
-        // 32-bit sum over pseudo-header
-        sumWords(p, (7 + pLength), &sum);
-        tmp16 = p->preamble;
-        tmp16 = htons(tmp16);
-        sumWords(&tmp16, 1, &sum);
-        // add udp header and data
-        tmp16 = htons(pLength);
-        sumWords(&tmp16, 1, &sum);
-        sumWords(p, pLength, &sum);
-        ok = (getChecksum(sum) == 0);
-    }
-
-    // calculate checksum and see if correct
-
-    // preamble and checksum check to determine if valid Protocol packet
-    return ok;
-}
-*/
 
 
 
