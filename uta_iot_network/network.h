@@ -12,5 +12,6 @@
 #include <stdbool.h>
 
 void initNetwork();
+void registerSendCallback(void (*s)(uint8_t*, uint8_t), uint8_t* data, uint8_t length);
 
 #endif /* NETWORK_H_ */
