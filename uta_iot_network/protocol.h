@@ -66,5 +66,13 @@ void sendPingRequest(uint8_t* buffer, uint8_t deviceId);
 bool isPingRequest(uint8_t* buffer);
 void sendPingResponse(uint8_t* buffer, uint8_t id, uint8_t deviceId);
 bool isPingResponse(uint8_t* packet);
+void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
+uint16_t getChecksum(uint32_t sum);
+void calcProtocolChecksum(packetHeader *packet);
+uint16_t htons(uint16_t value);
+uint32_t htonl(uint32_t value);
+
+
+
 
 #endif /* PROTOCOL_H_ */
