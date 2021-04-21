@@ -13,14 +13,18 @@
 #include "uart0.h"
 #include "common_terminal_interface.h"
 
+static uint8_t count = 0;
+bool isCarriageReturn = false;
+
+// This code has been modified since our keyboard input is not interrupt driven
 // Gets a user defined string using the serial peripheral Uart0
 void getsUart0(USER_DATA* data)
 {
     // Keeps count of how many characters we currently have in the buffer
     // Also serves to provide us with the position of the last character input
-    uint8_t count = 0;
+    //uint8_t count = 0;
 
-    while(true)
+    //while(true)
     {
         char c = getcUart0();
 
@@ -33,17 +37,23 @@ void getsUart0(USER_DATA* data)
             // Else, we just look for new characters
             if(count > 0)
                 count--;
+            /*
             else
                 continue;
+            */
         }
         // If the character is a carriage return (13) or a line feed (10)
         else if(c == 13 || c == 10)
         {
             data->buffer[count] = 0;
+            count = 0;
+            isCarriageReturn = true;
             return;
         }
+        /*
         else if(c < 32)
             continue;
+        */
         // If the character is anything greater than a space
         else if(c >= 32)
         {
@@ -51,18 +61,80 @@ void getsUart0(USER_DATA* data)
             if(count == MAX_CHARS)
             {
                 data->buffer[count] = '\0';
+                count = 0;
+                isCarriageReturn = true;
                 return;
             }
         }
     }
 }
 
+void printUint8InDecimal(uint8_t n)
+{
+    /*
+     * Depending how many digits n has, set the divider
+     * If n has only one digit, this will prevent leading
+     * zeros from being printed
+     */
+    uint16_t divider = 0;
+    if(n < 10)
+        divider = 1;
+    else if(n < 100)
+        divider = 10;
+    else if(n < 1000)
+        divider = 100;
+
+    while(divider)
+    {
+        uint8_t currentDigit = n / divider;
+        divider /= 10;
+        putcUart0((currentDigit % 10) + '0');
+    }
+}
+
+void printUint8InHex(uint8_t n)
+{
+    // Print 4 bits at a time
+    int8_t i = 0;
+    for(i = 1; i >= 0; i--)
+    {
+        uint8_t currentNumber = (n >> (i << 2)) & 0xF;
+        if(currentNumber > 9)
+        {
+            switch(currentNumber)
+            {
+            case 10:
+                putcUart0('a');
+                break;
+            case 11:
+                putcUart0('b');
+                break;
+            case 12:
+                putcUart0('c');
+                break;
+            case 13:
+                putcUart0('d');
+                break;
+            case 14:
+                putcUart0('e');
+                break;
+            case 15:
+                putcUart0('f');
+                break;
+            }
+        }
+        else
+            printUint8InDecimal(currentNumber);
+    }
+
+}
+
 // Tokenizes the string in place
 void parseField(USER_DATA* data)
 {
+    data->fieldCount = 0;
     bool IsNewToken = false;
     uint8_t i = 0;
-    data->fieldCount = 0;
     for(i = 0; (data->buffer[i] != '\0') && (data->fieldCount < MAX_FIELDS); i++)
     {
         // Only tokenize alpha numeric characters
@@ -113,26 +185,19 @@ bool isCommand(USER_DATA* data, const char strCommand[], uint8_t minArguments)
     return false;
 }
 
-// Gets a pointer the requested integer field from the input
-int32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber)
+// Gets the requested integer field from the input
+uint32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber)
 {
+    uint32_t sum = 0;
     if((fieldNumber < MAX_FIELDS) &&
        (fieldNumber < data->fieldCount) &&
        (data->fieldType[fieldNumber] == 'n'))
-        return data->fieldPosition[fieldNumber];;
-    return 0;
-}
-
-// Gets an integer value from the buffer
-uint8_t getInteger(USER_DATA* data, uint8_t position)
-{
-    uint8_t integerVal = 0;
-    while(data->buffer[position] != '\0')
     {
-        integerVal = (integerVal * 10) + (data->buffer[position] - '0');
-        position++;
+        uint8_t pos = data->fieldPosition[fieldNumber];
+        while(data->buffer[pos] != '\0')
+            sum = (sum * 10) + (data->buffer[pos++] - '0');
     }
-    return integerVal;
+    return sum;
 }
 
 // Get a pointer to the requested string field
@@ -154,12 +219,3 @@ void strCpy(const char* str1, char* str2)
     }
     str2[i] = '\0';
 }
-
-uint32_t strLen(const char* str)
-{
-    uint32_t i = 0;
-    while(str[i])
-        i++;
-    return i;
-}
-

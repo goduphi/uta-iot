@@ -6,11 +6,14 @@
  *
  */
 
-#ifndef COMMON_TERMINAL_INTERFACE_H_
-#define COMMON_TERMINAL_INTERFACE_H_
+#ifndef CLI_H_
+#define CLI_H_
+
+#include <stdint.h>
+#include <stdbool.h>
 
 #define MAX_CHARS 80
-#define MAX_FIELDS 5
+#define MAX_FIELDS 10
 
 //-----------------------------------------------------------------------------
 // Structs
@@ -24,13 +27,13 @@ typedef struct _USER_DATA
 } USER_DATA;
 
 void getsUart0(USER_DATA* data);
+void printUint8InDecimal(uint8_t n);
+void printUint8InHex(uint8_t n);
 void parseField(USER_DATA* data);
 bool isCommand(USER_DATA* data, const char strCommand[], uint8_t minArguments);
-//int32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber);
-uint8_t getInteger(USER_DATA* data, uint8_t position);
+uint32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber);
 char* getFieldString(USER_DATA* data, uint8_t fieldNumber);
 bool stringCompare(const char string1[], const char string2[]);
 void strCpy(const char* str1, char* str2);
-uint32_t strLen(const char* str);
 
-#endif /* COMMON_TERMINAL_INTERFACE_H_ */
+#endif /* CLI_H_ */

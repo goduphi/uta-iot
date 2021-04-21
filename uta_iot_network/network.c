@@ -17,6 +17,8 @@
 #include "protocol.h"
 #include "utils.h"
 #include "device.h"
+#include "common_terminal_interface.h"
+#include "messageQueue.h"
 
 #define DEBUG
 
@@ -28,11 +30,13 @@
 #define JOIN_LED            PORTF,2
 #define RX_LED              PORTF,3
 
-#define MAX_DEVICES         10
 #define MAX_PACKET_SIZE     20
 #define EMPTY_DEVICE        -1
 
 #define NETWORK_ADDRESS     0xACCE55
+
+// Global variables
+extern bool isCarriageReturn;
 
 uint8_t timeIndex = 0;
 uint32_t slottedTimes[] = {20e6, 40e6, 120e6, 40e6};
@@ -90,14 +94,18 @@ uint8_t getNewDeviceId()
 
 void addDevice(uint8_t id, uint8_t slotNumber)
 {
+    if(id >= MAX_DEVICES)
+        return;
     devices[id] = slotNumber;
 }
 // Bridge functions - End
 
+// Device functions - Start
 uint8_t getTimeSlot()
 {
     return (packet + 7)[0];
 }
+// Device functions - End
 
 // This interrupt gets called any time we want to process data
 void timer0Isr()
@@ -117,6 +125,20 @@ void timer0Isr()
         break;
     case 1:
         // Down Link slot
+        if(!qEmpty())
+        {
+            qnode message = pop();
+            switch(message.type)
+            {
+            case JOIN_RESP:
+                sendJoinResponse(packet, 1, message.id, deviceIndex);
+                deviceIndex++;
+                break;
+            case PING_REQ:
+                sendPingRequest(packet, message.id);
+                break;
+            }
+        }
         break;
     case 2:
         // Access Slot
@@ -126,9 +148,7 @@ void timer0Isr()
             accessSlot = true;
         }
         else
-        {
             rfSetMode(TX);
-        }
         break;
     case 3:
         if(bridgeMode)
@@ -146,8 +166,17 @@ void timer0Isr()
     // by default
     if(!bridgeMode && (timeIndex == (currentDeviceTimeSlot + 3)) && dataAvailable && slotAssigned)
     {
-        // Send data baby
-        rfSendBuffer(tmp2, 3);
+        if(!qEmpty())
+        {
+            qnode message = pop();
+            switch(message.type)
+            {
+            case PING_RESP:
+                //sendPingResponse(packet, getNewDeviceId(), getDeviceId());
+                break;
+            }
+        }
+        rfSendBuffer(tmp1, 3);
     }
 
     if(timeIndex < 4)
@@ -173,7 +202,6 @@ void timer0Isr()
 /*
  * Public functions
  */
-
 void initNetwork()
 {
     initHw();
@@ -197,9 +225,33 @@ void initNetwork()
         rfSetMode(RX);
     }
 
+    USER_DATA userData;
+
     // Endless receive loop
     while(true)
     {
+        if(kbhitUart0())
+        {
+            getsUart0(&userData);
+
+            if(isCarriageReturn)
+            {
+                isCarriageReturn = false;
+                parseField(&userData);
+
+                // Insert command functions here
+                if(isCommand(&userData, "send", 1))
+                {
+                    if(stringCompare("ping", getFieldString(&userData, 1)))
+                    {
+                        putsUart0("Sending ping ...\n");
+                        qnode pingRequest = {getFieldInteger(&userData, 2), PING_REQ};
+                        push(pingRequest);
+                    }
+                }
+            }
+        }
+
         // Keep on polling for the push button press
         // If pressed, let the user join for a short period of time
         if(joinNetwork())
@@ -234,19 +286,26 @@ void initNetwork()
                     {
                         if(isJoinRequest(packet))
                         {
-                            putsUart0("Received join request\n");
                             uint8_t newDeviceId = getNewDeviceId();
+                            sprintf(out, "Received join request\nNew device id = %d\n", newDeviceId);
+                            putsUart0(out);
+
                             if(!deviceExists(newDeviceId))
                             {
                                 addDevice(newDeviceId, deviceIndex);
-                                sendJoinResponse(packet, 1, newDeviceId, deviceIndex);
-                                deviceIndex++;
+                                qnode joinResponse = {newDeviceId, JOIN_RESP};
+                                push(joinResponse);
                             }
                             else
                             {
                                 putsUart0("Device already exists\n");
                             }
                         }
+                    }
+
+                    if(isPingResponse(packet))
+                    {
+                        putsUart0("Received ping response\n");
                     }
 
                     if(packet[0] == 0x77)
@@ -281,6 +340,14 @@ void initNetwork()
                         putsUart0(out);
                         slotAssigned = true;
                     }
+
+                    if(isPingRequest(packet))
+                    {
+                        putsUart0("Received ping request\n");
+                        qnode pingResponse = {getDeviceId(), PING_RESP};
+                        push(pingResponse);
+                    }
+
                     break;
                 }
             }

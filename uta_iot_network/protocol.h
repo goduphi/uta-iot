@@ -12,6 +12,9 @@
  * Stack Size: 4096
  */
 
+#ifndef PROTOCOL_H_
+#define PROTOCOL_H_
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -59,12 +62,9 @@ void sendJoinRequest(uint8_t* buffer, uint8_t nBytes, uint8_t deviceId);
 bool isJoinRequest(uint8_t* buffer);
 void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotNumber);
 bool isJoinResponse(uint8_t* buffer);
+void sendPingRequest(uint8_t* buffer, uint8_t deviceId);
+bool isPingRequest(uint8_t* buffer);
+void sendPingResponse(uint8_t* buffer, uint8_t id, uint8_t deviceId);
+bool isPingResponse(uint8_t* packet);
 
-/*
-void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
-void getChecksum(uint32_t sum);
-void calcProtocolChecksum(packetHeader *packet);
-*/
-
-
-
+#endif /* PROTOCOL_H_ */

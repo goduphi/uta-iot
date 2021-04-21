@@ -20,7 +20,8 @@ int main(void)
     initUart0();
     setUart0BaudRate(115200, 40e6);
 
-    setDeviceId(3);
+    // The device id will be a range from 0 - MAX_DEVICES
+    setDeviceId(2);
 
     /*
      * Register the callback here
