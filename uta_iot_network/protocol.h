@@ -32,7 +32,8 @@ typedef enum _messageType
     PING_RESP = 0x04,
     CAPS_REQ = 0x05,
     CAPS_RESP = 0x06,
-    PUSH_MSG = 0x07
+    PUSH_MSG = 0x07,
+    JOIN_ACK = 0x08
 
 } messageType;
 

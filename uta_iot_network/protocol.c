@@ -72,8 +72,7 @@ void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotN
     pH->messageType = (uint8_t)JOIN_RESP;
     pH->length = nBytes;
     pH->checksum = 0;
-    uint8_t* data = buffer + 7;
-    data[0] = slotNumber;
+    (*(buffer + 7)) = slotNumber;
     rfSendBuffer((uint8_t*)pH, 7 + nBytes);
 }
 
