@@ -12,6 +12,7 @@
 #include "nrf24l01.h"
 #include "timer0.h"
 #include "uart0.h"
+#include "network.h"
 #include "joinNetwork.h"
 #include "wait.h"
 #include "protocol.h"
@@ -25,10 +26,6 @@
 #ifdef DEBUG
     #include <stdio.h>
 #endif
-
-#define TX_LED              PORTF,1
-#define JOIN_LED            PORTF,2
-#define RX_LED              PORTF,3
 
 #define MAX_PACKET_SIZE     20
 
@@ -45,7 +42,7 @@ bool accessSlot = false;
 bool joinPressed = false;
 bool letJoin = false;
 
-bool bridgeMode = false;
+bool bridgeMode = true;
 
 // This buffer will be the TX and RX buffer
 uint8_t packet[MAX_PACKET_SIZE];
@@ -54,11 +51,14 @@ uint8_t receivedBridgeAddress = 0;
 uint8_t deviceDataBuffer[MAX_PACKET_SIZE];
 uint8_t deviceDataLength = 0;
 
+bool isPressed = false;
+void (*pushDataReceiveCallback)(uint8_t*);
+
 // Temporary variables
 // These will be removed later
 char out[50];
-
-bool isPressed = false;
+pair bindTable[MAX_DEVICES];
+uint8_t bindIndex = 0;
 
 /*
  * Private functions
@@ -96,20 +96,27 @@ void timer0Isr()
         }
         break;
     case 1:
-        // Down Link slot
-        if(!qEmpty())
+        if(bridgeMode)
         {
-            qnode message = pop();
-            switch(message.type)
+            // Down Link slot
+            if(!qEmpty())
             {
-            case JOIN_RESP:
-                putsUart0("Sending join response ...\n");
-                sendJoinResponse(packet, 1, message.id, getDeviceTimeSlot(message.id));
-                break;
-            case PING_REQ:
-                putsUart0("Sending ping ...\n");
-                sendPingRequest(packet, message.id);
-                break;
+                qnode message = pop();
+                switch(message.type)
+                {
+                case JOIN_RESP:
+                    putsUart0("Sending join response ...\n");
+                    sendJoinResponse(packet, 1, message.id, getDeviceTimeSlot(message.id));
+                    break;
+                case PING_REQ:
+                    putsUart0("Sending ping ...\n");
+                    sendPingRequest(packet, message.id);
+                    break;
+                case PUSH_MSG:
+                    putsUart0("Pushing data ...\n");
+                    pushData(packet, deviceDataBuffer, BRIDGE_ADDRESS, message.id, deviceDataLength);
+                    break;
+                }
             }
         }
         break;
@@ -188,6 +195,32 @@ void timer0Isr()
     clearTimer0InterruptFlag();
 }
 
+void bridgeReceivePushData(uint8_t* packet)
+{
+    packetHeader* pH = (packetHeader*)packet;
+    uint8_t i = 0;
+    for(i = 0; i < bindIndex; i++)
+    {
+        if(bindTable[i].id1 == pH->from)
+        {
+            deviceDataBuffer[0] = (*(packet + 7));
+            deviceDataLength = pH->length;
+            qnode tmp = {bindTable[i].id2, PUSH_MSG};
+            push(tmp);
+        }
+    }
+}
+
+void registerPushDataCallback(void (*callback)(uint8_t*))
+{
+    pushDataReceiveCallback = callback;
+}
+
+bool getMode()
+{
+    return bridgeMode;
+}
+
 /*
  * Public functions
  */
@@ -208,6 +241,7 @@ void initNetwork()
     {
         putsUart0("TX Mode\n");
         rfSetMode(TX);
+        registerPushDataCallback(bridgeReceivePushData);
         setTimerLoadValue(0);
         startTimer0();
     }
@@ -248,11 +282,33 @@ void commsReceive()
                             push(pingRequest);
                         }
                     }
+
+                    // This is here for testing purposes
+                    if(bridgeMode && stringCompare("push", getFieldString(&userData, 1)))
+                    {
+                        uint8_t deviceId = getFieldInteger(&userData, 2);
+                        if(!deviceExists(deviceId))
+                            putsUart0("Device does not exist\n");
+                        else
+                        {
+                            deviceDataBuffer[0] = 2;
+                            deviceDataLength = 1;
+                            qnode pushData = {deviceId, PUSH_MSG};
+                            push(pushData);
+                        }
+                    }
+                }
+
+                if(isCommand(&userData, "bind", 2))
+                {
+                    putsUart0("Binding ...\n");
+                    pair p = {getFieldInteger(&userData, 1), getFieldInteger(&userData, 2)};
+                    bindTable[bindIndex++] = p;
                 }
             }
         }
 
-
+        // Insert send functions
         if(!bridgeMode && !isPressed && !getPinValue(USER_SWITCH2))
         {
             isPressed = true;
@@ -319,9 +375,7 @@ void commsReceive()
                     }
 
                     if(isPushData(packet, BRIDGE_ADDRESS))
-                    {
-                        putsUart0("Received push button press\n");
-                    }
+                        pushDataReceiveCallback(packet);
                 }
                 else
                 {
@@ -351,6 +405,9 @@ void commsReceive()
                         push(pingResponse);
                         receivedBridgeAddress = getNewDeviceId(packet);
                     }
+
+                    if(isPushData(packet, getDeviceId()))
+                        pushDataReceiveCallback(packet);
                 }
             }
         }

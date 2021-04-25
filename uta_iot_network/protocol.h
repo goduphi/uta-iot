@@ -69,5 +69,7 @@ void sendPingRequest(uint8_t* buffer, uint8_t deviceId);
 bool isPingRequest(uint8_t* buffer);
 void sendPingResponse(uint8_t* buffer, uint8_t id, uint8_t deviceId);
 bool isPingResponse(uint8_t* packet);
+void pushData(uint8_t* buffer, uint8_t* data, uint8_t from, uint8_t to, uint8_t nBytes);
+bool isPushData(uint8_t* packet, uint8_t address);
 
 #endif /* PROTOCOL_H_ */

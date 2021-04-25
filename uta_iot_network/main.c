@@ -15,7 +15,16 @@
 #include "network.h"
 #include "device.h"
 #include "messageQueue.h"
-#include "nrf24l01.h"
+#include "protocol.h"
+
+void receiveData(uint8_t* buffer)
+{
+    putsUart0("Turning on led ...\n");
+    packetHeader* pH = (packetHeader*)buffer;
+    uint8_t* data = (buffer + 7);
+    if(data[0] == 1)
+        setPinValue(JOIN_LED, 1);
+}
 
 int main(void)
 {
@@ -25,11 +34,13 @@ int main(void)
     initNetwork();
 
     // The device id will be a range from 0 - MAX_DEVICES
-    setDeviceId(3);
+    setDeviceId(4);
 
     /*
      * Register the callback here
      */
+    if(!getMode())
+        registerPushDataCallback(receiveData);
 
     while(true)
     {

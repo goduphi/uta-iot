@@ -15,6 +15,12 @@
 #define MAX_DEVICES         10
 #define EMPTY_DEVICE        -1
 
+typedef struct _pair
+{
+    uint8_t id1;
+    uint8_t id2;
+} pair;
+
 void setDeviceId(uint8_t id);
 uint8_t getDeviceId();
 uint8_t getTimeSlot(uint8_t* packet);
