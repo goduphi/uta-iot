@@ -10,22 +10,29 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "clock.h"
+#include "gpio.h"
 #include "uart0.h"
 #include "network.h"
 #include "device.h"
+#include "messageQueue.h"
+#include "nrf24l01.h"
 
 int main(void)
 {
     initSystemClockTo40Mhz();
     initUart0();
     setUart0BaudRate(115200, 40e6);
+    initNetwork();
 
     // The device id will be a range from 0 - MAX_DEVICES
-    setDeviceId(4);
+    setDeviceId(3);
 
     /*
      * Register the callback here
      */
 
-    initNetwork();
+    while(true)
+    {
+        commsReceive();
+    }
 }

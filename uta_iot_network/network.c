@@ -51,11 +51,14 @@ bool bridgeMode = false;
 uint8_t packet[MAX_PACKET_SIZE];
 uint8_t receivedBridgeAddress = 0;
 
-bool dataAvailable = true;
+uint8_t deviceDataBuffer[MAX_PACKET_SIZE];
+uint8_t deviceDataLength = 0;
 
 // Temporary variables
 // These will be removed later
 char out[50];
+
+bool isPressed = false;
 
 /*
  * Private functions
@@ -68,6 +71,17 @@ void initHw()
     selectPinPushPullOutput(RX_LED);
 }
 
+// Device initialization
+#define USER_SWITCH2                PORTF,0
+
+void initPushButton()
+{
+    enablePort(PORTF);
+    enablePinPullup(USER_SWITCH2);
+    setPinCommitControl(USER_SWITCH2);
+    selectPinDigitalInput(USER_SWITCH2);
+}
+
 // This interrupt gets called any time we want to process data
 void timer0Isr()
 {
@@ -78,7 +92,7 @@ void timer0Isr()
         if(bridgeMode)
         {
             sendSync(packet, 0);
-            waitMicrosecond(12);
+            waitMicrosecond(18);
         }
         break;
     case 1:
@@ -125,8 +139,9 @@ void timer0Isr()
         break;
     }
 
-#ifdef DEBUG
     setPinValue(TX_LED, getPinValue(TX_LED)^1);
+
+#ifdef DEBUG
     // sprintf(out, "Time index = %d\n", timeIndex);
     // putsUart0(out);
 #endif
@@ -143,6 +158,11 @@ void timer0Isr()
             case PING_RESP:
                 putsUart0("Sending ping response ...\n");
                 sendPingResponse(packet, receivedBridgeAddress, message.id);
+                break;
+            case PUSH_MSG:
+                putsUart0("Sending new data ...\n");
+                pushData(packet, deviceDataBuffer, message.id, BRIDGE_ADDRESS, deviceDataLength);
+                isPressed = false;
                 break;
             }
         }
@@ -171,6 +191,7 @@ void timer0Isr()
 /*
  * Public functions
  */
+
 void initNetwork()
 {
     initHw();
@@ -181,6 +202,7 @@ void initNetwork()
     initTimer0();
     initDevices();
     stopTimer0();
+    initPushButton();
 
     if(bridgeMode)
     {
@@ -194,11 +216,14 @@ void initNetwork()
         putsUart0("RX Mode\n");
         rfSetMode(RX);
     }
+}
 
+void commsReceive()
+{
     USER_DATA userData;
 
     // Endless receive loop
-    while(true)
+    // while(true)
     {
         if(kbhitUart0())
         {
@@ -212,7 +237,7 @@ void initNetwork()
                 // Insert command functions here
                 if(isCommand(&userData, "send", 1))
                 {
-                    if(stringCompare("ping", getFieldString(&userData, 1)))
+                    if(bridgeMode && stringCompare("ping", getFieldString(&userData, 1)))
                     {
                         uint8_t deviceId = getFieldInteger(&userData, 2);
                         if(!deviceExists(deviceId))
@@ -227,6 +252,17 @@ void initNetwork()
             }
         }
 
+
+        if(!bridgeMode && !isPressed && !getPinValue(USER_SWITCH2))
+        {
+            isPressed = true;
+            putsUart0("Push button pressed\n");
+            deviceDataBuffer[0] = 1;
+            deviceDataLength = 1;
+            qnode data = {getDeviceId(), PUSH_MSG};
+            push(data);
+        }
+
         // Keep on polling for the push button press
         // If pressed, let the user join for a short period of time
         if(joinNetwork() && joinPressed)
@@ -237,7 +273,7 @@ void initNetwork()
                 letJoin = true;
                 setPinValue(JOIN_LED, 1);
             }
-            else
+            else if(!deviceSlotIsAssigned())
             {
                 putsUart0("Sending join request ...\n");
                 sendJoinRequest(packet, 0, getDeviceId());
@@ -282,17 +318,10 @@ void initNetwork()
                         putsUart0(out);
                     }
 
-                    /*
-                    if(packet[0] == 0x77)
+                    if(isPushData(packet, BRIDGE_ADDRESS))
                     {
-                        uint8_t i = 0;
-                        for(i = 1; i < n; i++)
-                        {
-                            sprintf(out, "Data[%d] = %x\n", i, packet[i]);
-                            putsUart0(out);
-                        }
+                        putsUart0("Received push button press\n");
                     }
-                    */
                 }
                 else
                 {

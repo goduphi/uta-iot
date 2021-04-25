@@ -17,7 +17,6 @@
 #include "device.h"
 
 #define PREAMBLE            0xAA
-#define BRIDGE_ADDRESS      0x42
 
 //----------------------------
 // Protocol Functions
@@ -120,6 +119,31 @@ bool isPingResponse(uint8_t* packet)
 {
     packetHeader* pH = (packetHeader*)packet;
     if(pH->preamble == PREAMBLE && pH->to == BRIDGE_ADDRESS && pH->messageType == (uint8_t)PING_RESP)
+        return true;
+    return false;
+}
+
+void pushData(uint8_t* buffer, uint8_t* data, uint8_t from, uint8_t to, uint8_t nBytes)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = from;
+    pH->to = to;
+    pH->messageType = (uint8_t)PUSH_MSG;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    uint8_t i = 0;
+    for(i = 0; i < nBytes; i++)
+    {
+        (*(buffer + 7 + i)) = data[i];
+    }
+    rfSendBuffer((uint8_t*)pH, 7 + nBytes);
+}
+
+bool isPushData(uint8_t* packet, uint8_t address)
+{
+    packetHeader* pH = (packetHeader*)packet;
+    if(pH->preamble == PREAMBLE && pH->to == address && pH->messageType == (uint8_t)PUSH_MSG)
         return true;
     return false;
 }

@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define BRIDGE_ADDRESS      0x42
+
 //----------------------------
 // Protocol Enumerations
 //----------------------------
