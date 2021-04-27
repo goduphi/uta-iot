@@ -18,7 +18,10 @@ bool qFull()
 
 bool qEmpty()
 {
-    return head == tail;
+    bool empty = (head == tail);
+    if(empty)
+        head = tail = 0;
+    return empty;
 }
 
 void push(qnode q)

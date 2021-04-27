@@ -18,6 +18,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define BRIDGE_ADDRESS      0x42
+#define MAX_DEVICE_NAME     16
+#define MAX_ATTRIBUTE_INFO  3
+#define MAX_TOPIC_NAME      10
+
 //----------------------------
 // Protocol Enumerations
 //----------------------------
@@ -32,7 +37,9 @@ typedef enum _messageType
     PING_RESP = 0x04,
     CAPS_REQ = 0x05,
     CAPS_RESP = 0x06,
-    PUSH_MSG = 0x07
+    PUSH_MSG = 0x07,
+    DEV_CAPS1 = 0x08,
+    DEV_CAPS2 = 0x09
 
 } messageType;
 
@@ -52,6 +59,19 @@ typedef struct _packetHeader    // 7 bytes + Data bytes
     uint8_t data[0];
 } packetHeader;
 
+typedef struct _attribute
+{
+    uint8_t id;
+    char topicName[MAX_TOPIC_NAME + 1];
+} attribute;
+
+typedef struct _devCaps
+{
+    char deviceName[MAX_DEVICE_NAME];
+    uint8_t attributeCount;
+    attribute attributes[MAX_ATTRIBUTE_INFO];
+} devCaps;
+
 //----------------------------
 // Protocol Functions
 //----------------------------
@@ -62,17 +82,14 @@ void sendJoinRequest(uint8_t* buffer, uint8_t nBytes, uint8_t deviceId);
 bool isJoinRequest(uint8_t* buffer);
 void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotNumber);
 bool isJoinResponse(uint8_t* buffer);
+void assembleDevCaps(uint8_t* buffer, char* deviceName, uint8_t attributeCount, uint8_t attributeId[], char* topicNames[]);
+void sendDevCaps(uint8_t* buffer, uint8_t* devCapBuffer, messageType m);
+bool isDevCap(uint8_t* buffer, messageType m);
 void sendPingRequest(uint8_t* buffer, uint8_t deviceId);
 bool isPingRequest(uint8_t* buffer);
 void sendPingResponse(uint8_t* buffer, uint8_t id, uint8_t deviceId);
 bool isPingResponse(uint8_t* packet);
-void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
-uint16_t getChecksum(uint32_t sum);
-void calcProtocolChecksum(packetHeader *packet);
-uint16_t htons(uint16_t value);
-uint32_t htonl(uint32_t value);
-
-
-
+void pushData(uint8_t* buffer, uint8_t* data, uint8_t from, uint8_t to, uint8_t nBytes);
+bool isPushData(uint8_t* packet, uint8_t address);
 
 #endif /* PROTOCOL_H_ */

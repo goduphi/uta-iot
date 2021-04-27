@@ -15,77 +15,13 @@
 #include "nrf24l01.h"
 #include "protocol.h"
 #include "device.h"
+#include "common_terminal_interface.h"
 
 #define PREAMBLE            0xAA
-#define BRIDGE_ADDRESS      0x42
 
 //----------------------------
 // Protocol Functions
 //----------------------------
-
- //FIXME still working on checksum
-void sumWords(void* data, uint16_t sizeInBytes, uint32_t* sum)
-{
-    uint8_t* pData = (uint8_t*)data;
-    uint16_t i;
-    uint8_t phase = 0;
-    uint16_t data_temp;
-    for (i = 0; i < sizeInBytes; i++)
-    {
-        if (phase)
-        {
-            data_temp = *pData;
-            *sum += data_temp << 8;
-        }
-        else
-          *sum += *pData;
-        phase = 1 - phase;
-        pData++;
-    }
-}
-
-
-uint16_t getChecksum(uint32_t sum)
-{
-    uint16_t result;
-    // this is based on rfc1071
-    while ((sum >> 16) > 0)
-    {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    result = sum & 0xFFFF;
-    return ~result;
-}
-
-void calcProtocolChecksum(packetHeader *packet)
-{
-    uint8_t packetHeaderLength = (7 + packet->length);
-    uint32_t sum = 0;
-    // 32-bit sum over packet header
-    packet->checksum = 0;
-    sumWords(packet, packetHeaderLength, &sum);
-    packet->checksum = getChecksum(sum);
-}
-
-
-// Converts from host to network order and vice versa
-// smaller version
-uint16_t htons(uint16_t value)
-{
-    return ((value & 0xFF00) >> 8) + ((value & 0x00FF) << 8);
-}
-#define ntohs htons
-
-// larger version
-uint32_t htonl(uint32_t value)
-{
-    return ((0xFF000000 & value) >> 24) + ((0x00FF0000 & value) >> 8) +
-           ((0x0000FF00 & value) << 8) + ((0x000000FF & value) << 24);
-}
-
-#define ntohl htonl
-
-
 
 void sendSync(uint8_t* buffer, uint8_t nBytes)
 {
@@ -136,8 +72,7 @@ void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotN
     pH->messageType = (uint8_t)JOIN_RESP;
     pH->length = nBytes;
     pH->checksum = 0;
-    uint8_t* data = buffer + 7;
-    data[0] = slotNumber;
+    (*(buffer + 7)) = slotNumber;
     rfSendBuffer((uint8_t*)pH, 7 + nBytes);
 }
 
@@ -145,6 +80,62 @@ bool isJoinResponse(uint8_t* buffer)
 {
     packetHeader* pH = (packetHeader*)buffer;
     if(pH->preamble == PREAMBLE && pH->to == getDeviceId() && pH->messageType == (uint8_t)JOIN_RESP)
+        return true;
+    return false;
+}
+
+void assembleDevCaps(uint8_t* buffer, char* deviceName, uint8_t attributeCount, uint8_t attributeId[], char* topicNames[])
+{
+    devCaps* dC = (devCaps*)buffer;
+    strCpy(deviceName, dC->deviceName);
+    dC->attributeCount = attributeCount;
+    uint8_t i = 0;
+    for(i = 0; i < attributeCount; i++)
+    {
+        dC->attributes[i].id = attributeId[i];
+        strCpy(topicNames[i], dC->attributes[i].topicName);
+    }
+}
+
+void sendDevCaps(uint8_t* buffer, uint8_t* devCapBuffer, messageType m)
+{
+    if(m == DEV_CAPS1)
+    {
+        packetHeader* pH = (packetHeader*)buffer;
+        pH->preamble = PREAMBLE;
+        pH->from = getDeviceId();
+        pH->to = BRIDGE_ADDRESS;
+        pH->messageType = (uint8_t)m;
+        pH->length = 0;
+        pH->checksum = 0;
+
+        uint8_t i = 0;
+        for(i = 0; i < 25; i++)
+            (buffer + 7)[i] = devCapBuffer[i];
+
+        // Put the first part of the data here
+    }
+    else if(m == DEV_CAPS2)
+    {
+        buffer[0] = PREAMBLE;
+        buffer[1] = (uint8_t)m;
+
+        uint8_t i = 0;
+        for(i = 2; i < 33; i++)
+            buffer[i] = devCapBuffer[(i - 2) + 25];
+
+        // Put the second part of the data here
+    }
+
+    rfSendBuffer(buffer, 32);
+}
+
+bool isDevCaps(uint8_t* buffer, messageType m)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(m == DEV_CAPS1 && pH->preamble == PREAMBLE && pH->to == BRIDGE_ADDRESS)
+        return true;
+    if(m == DEV_CAPS2 && pH->preamble == PREAMBLE && buffer[1] == (uint8_t)DEV_CAPS2)
         return true;
     return false;
 }
@@ -185,6 +176,31 @@ bool isPingResponse(uint8_t* packet)
 {
     packetHeader* pH = (packetHeader*)packet;
     if(pH->preamble == PREAMBLE && pH->to == BRIDGE_ADDRESS && pH->messageType == (uint8_t)PING_RESP)
+        return true;
+    return false;
+}
+
+void pushData(uint8_t* buffer, uint8_t* data, uint8_t from, uint8_t to, uint8_t nBytes)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = from;
+    pH->to = to;
+    pH->messageType = (uint8_t)PUSH_MSG;
+    pH->length = nBytes;
+    pH->checksum = 0;
+    uint8_t i = 0;
+    for(i = 0; i < nBytes; i++)
+    {
+        (*(buffer + 7 + i)) = data[i];
+    }
+    rfSendBuffer((uint8_t*)pH, 7 + nBytes);
+}
+
+bool isPushData(uint8_t* packet, uint8_t address)
+{
+    packetHeader* pH = (packetHeader*)packet;
+    if(pH->preamble == PREAMBLE && pH->to == address && pH->messageType == (uint8_t)PUSH_MSG)
         return true;
     return false;
 }

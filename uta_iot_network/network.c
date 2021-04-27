@@ -12,6 +12,7 @@
 #include "nrf24l01.h"
 #include "timer0.h"
 #include "uart0.h"
+#include "network.h"
 #include "joinNetwork.h"
 #include "wait.h"
 #include "protocol.h"
@@ -19,6 +20,7 @@
 #include "device.h"
 #include "common_terminal_interface.h"
 #include "messageQueue.h"
+#include "eeprom.h"
 
 #define DEBUG
 
@@ -26,12 +28,7 @@
     #include <stdio.h>
 #endif
 
-#define TX_LED              PORTF,1
-#define JOIN_LED            PORTF,2
-#define RX_LED              PORTF,3
-
-#define MAX_PACKET_SIZE     20
-#define EMPTY_DEVICE        -1
+#define MAX_PACKET_SIZE     128
 
 #define NETWORK_ADDRESS     0xACCE55
 
@@ -39,28 +36,39 @@
 extern bool isCarriageReturn;
 
 uint8_t timeIndex = 0;
-uint32_t slottedTimes[] = {20e6, 40e6, 120e6, 40e6};
-bool accessSlot = false;
-bool letJoin = false;
-bool bridgeMode = false;
+uint8_t backoffCounter = 0;
+uint32_t slottedTimes[] = {1e6, 2e6, 40e6, 2e6};
 
-// Store the information of all connected devices
-// The indexes will represent the id of the device
-int8_t devices[MAX_DEVICES];
-uint8_t deviceIndex = 0;
+bool accessSlot = false;
+bool joinPressed = false;
+bool letJoin = false;
+
+bool bridgeMode = false;
 
 // This buffer will be the TX and RX buffer
 uint8_t packet[MAX_PACKET_SIZE];
+uint8_t globalOffset = 0;
 
-bool slotAssigned = false;
-uint8_t currentDeviceTimeSlot = 0;
-bool dataAvailable = true;
+uint8_t devCapsData[MAX_PACKET_SIZE];
+uint8_t dataReceivedIndex = 0;
+bool receivedDevCap = false;
+
+uint8_t receivedBridgeAddress = 0;
+
+uint8_t deviceDataBuffer[MAX_PACKET_SIZE];
+uint8_t deviceDataLength = 0;
+
+bool isPressed = false;
+void (*pushDataReceiveCallback)(uint8_t*);
 
 // Temporary variables
 // These will be removed later
-char out[50];
-uint8_t tmp1[] = {0x77, 0x48, 0x69};
-uint8_t tmp2[] = {0x77, 0x67, 0x23};
+char out[MAX_PACKET_SIZE];
+pair bindTable[MAX_DEVICES];
+uint8_t bindIndex = 0;
+
+char* topicNames[] = {"Temperature", "Humidity", "Pressure"};
+uint8_t topicIds[] = {0x01, 0x02, 0x03};
 
 /*
  * Private functions
@@ -73,70 +81,52 @@ void initHw()
     selectPinPushPullOutput(RX_LED);
 }
 
-// Bridge functions - Start
-void initDevices()
-{
-    uint8_t i = 0;
-    for(i = 0; i < MAX_DEVICES; i++)
-        devices[i] = EMPTY_DEVICE;
-}
+// Device initialization
+#define USER_SWITCH2                PORTF,0
 
-bool deviceExists(uint8_t id)
+void initPushButton()
 {
-    return devices[id] != EMPTY_DEVICE;
+    enablePort(PORTF);
+    enablePinPullup(USER_SWITCH2);
+    setPinCommitControl(USER_SWITCH2);
+    selectPinDigitalInput(USER_SWITCH2);
 }
-
-uint8_t getNewDeviceId()
-{
-    packetHeader* pH = (packetHeader*)packet;
-    return pH->from;
-}
-
-void addDevice(uint8_t id, uint8_t slotNumber)
-{
-    if(id >= MAX_DEVICES)
-        return;
-    devices[id] = slotNumber;
-}
-// Bridge functions - End
-
-// Device functions - Start
-uint8_t getTimeSlot()
-{
-    return (packet + 7)[0];
-}
-// Device functions - End
 
 // This interrupt gets called any time we want to process data
 void timer0Isr()
 {
-#ifdef DEBUG
-    setPinValue(TX_LED, getPinValue(TX_LED)^1);
-    sprintf(out, "Time index = %d\n", timeIndex);
-    putsUart0(out);
-#endif
-
     switch(timeIndex)
     {
     case 0:
         // Sync slot, size = 0
         if(bridgeMode)
+        {
             sendSync(packet, 0);
+            waitMicrosecond(18);
+        }
         break;
     case 1:
-        // Down Link slot
-        if(!qEmpty())
+        if(bridgeMode)
         {
-            qnode message = pop();
-            switch(message.type)
+            // Down Link slot
+            if(!qEmpty())
             {
-            case JOIN_RESP:
-                sendJoinResponse(packet, 1, message.id, deviceIndex);
-                deviceIndex++;
-                break;
-            case PING_REQ:
-                sendPingRequest(packet, message.id);
-                break;
+                qnode message = pop();
+                switch(message.type)
+                {
+                case JOIN_RESP:
+                    putsUart0("Sending join response ...\n");
+                    sendJoinResponse(packet, 1, message.id, getDeviceTimeSlot(message.id));
+                    break;
+                case PING_REQ:
+                    putsUart0("Sending ping ...\n");
+                    sendPingRequest(packet, message.id);
+                    break;
+                case PUSH_MSG:
+                    putsUart0("Pushing data ...\n");
+                    pushData(packet, deviceDataBuffer, BRIDGE_ADDRESS, message.id, deviceDataLength);
+                    break;
+                }
             }
         }
         break;
@@ -148,9 +138,13 @@ void timer0Isr()
             accessSlot = true;
         }
         else
+        {
             rfSetMode(TX);
+        }
+        joinPressed = true;
         break;
     case 3:
+        joinPressed = false;
         if(bridgeMode)
         {
             accessSlot = false;
@@ -162,25 +156,43 @@ void timer0Isr()
         break;
     }
 
+    setPinValue(TX_LED, getPinValue(TX_LED)^1);
+
+#ifdef DEBUG
+    // sprintf(out, "Time index = %d\n", timeIndex);
+    // putsUart0(out);
+#endif
+
     // Offset the device time slot by 3 because the first three are taken up
     // by default
-    if(!bridgeMode && (timeIndex == (currentDeviceTimeSlot + 3)) && dataAvailable && slotAssigned)
+    if(!bridgeMode && (timeIndex == (getCurrentTimeSlot() + 3)) && deviceSlotIsAssigned())
     {
-        rfSetMode(TX);
         if(!qEmpty())
         {
             qnode message = pop();
             switch(message.type)
             {
             case PING_RESP:
-                sendPingResponse(packet, getNewDeviceId(), getDeviceId());
+                putsUart0("Sending ping response ...\n");
+                sendPingResponse(packet, receivedBridgeAddress, message.id);
+                break;
+            case PUSH_MSG:
+                putsUart0("Sending new data ...\n");
+                pushData(packet, deviceDataBuffer, message.id, BRIDGE_ADDRESS, deviceDataLength);
+                isPressed = false;
+                break;
+            case DEV_CAPS1:
+                putsUart0("Sending dev cap 1 ...\n");
+                sendDevCaps(packet, devCapsData, DEV_CAPS1);
+                qnode devCaps2 = {BRIDGE_ADDRESS, DEV_CAPS2};
+                push(devCaps2);
+                break;
+            case DEV_CAPS2:
+                putsUart0("Sending dev cap 2 ...\n");
+                sendDevCaps(packet, devCapsData, DEV_CAPS2);
                 break;
             }
         }
-        rfSetMode(RX);
-        stopTimer0();
-        clearTimer0InterruptFlag();
-        timeIndex = 0;
     }
 
     if(timeIndex < 4)
@@ -203,9 +215,38 @@ void timer0Isr()
     clearTimer0InterruptFlag();
 }
 
+void bridgeReceivePushData(uint8_t* packet)
+{
+    packetHeader* pH = (packetHeader*)packet;
+    uint8_t i = 0;
+    for(i = 0; i < bindIndex; i++)
+    {
+        if(bindTable[i].id1 == pH->from)
+        {
+            deviceDataBuffer[0] = (*(packet + 7));
+            deviceDataLength = pH->length;
+            qnode tmp = {bindTable[i].id2, PUSH_MSG};
+            push(tmp);
+        }
+    }
+}
+
+void registerPushDataCallback(void (*callback)(uint8_t*))
+{
+    pushDataReceiveCallback = callback;
+}
+
+void tmp(uint8_t* packet) {}
+
+bool getMode()
+{
+    return bridgeMode;
+}
+
 /*
  * Public functions
  */
+
 void initNetwork()
 {
     initHw();
@@ -215,24 +256,40 @@ void initNetwork()
     initJoinNetwork();
     initTimer0();
     initDevices();
+    stopTimer0();
+    initPushButton();
 
     if(bridgeMode)
     {
         putsUart0("TX Mode\n");
         rfSetMode(TX);
+        registerPushDataCallback(bridgeReceivePushData);
         setTimerLoadValue(0);
         startTimer0();
     }
     else
     {
+        assembleDevCaps(devCapsData, "Weather", 2, topicIds, topicNames);
+        devCaps* dC = (devCaps*)devCapsData;
+        sprintf(out, "Device name = %s, Attribute count = %d\n", dC->deviceName, dC->attributeCount);
+        putsUart0(out);
+        uint8_t i = 0;
+        for(i = 0; i < dC->attributeCount; i++)
+        {
+            sprintf(out, "%d. Attr = %s, Id = %d\n", (i + 1), dC->attributes[i].topicName, dC->attributes[i].id);
+            putsUart0(out);
+        }
         putsUart0("RX Mode\n");
         rfSetMode(RX);
     }
+}
 
+void commsReceive()
+{
     USER_DATA userData;
 
     // Endless receive loop
-    while(true)
+    // while(true)
     {
         if(kbhitUart0())
         {
@@ -246,20 +303,63 @@ void initNetwork()
                 // Insert command functions here
                 if(isCommand(&userData, "send", 1))
                 {
-                    if(stringCompare("ping", getFieldString(&userData, 1)))
+                    if(bridgeMode && stringCompare("ping", getFieldString(&userData, 1)))
                     {
-                        putsUart0("Sending ping ...\n");
-                        qnode pingRequest = {getFieldInteger(&userData, 2), PING_REQ};
-                        push(pingRequest);
+                        uint8_t deviceId = getFieldInteger(&userData, 2);
+                        if(!deviceExists(deviceId))
+                            putsUart0("Device does not exist\n");
+                        else
+                        {
+                            qnode pingRequest = {deviceId, PING_REQ};
+                            push(pingRequest);
+                        }
+                    }
+
+                    // This is here for testing purposes
+                    if(bridgeMode && stringCompare("push", getFieldString(&userData, 1)))
+                    {
+                        uint8_t deviceId = getFieldInteger(&userData, 2);
+                        if(!deviceExists(deviceId))
+                            putsUart0("Device does not exist\n");
+                        else
+                        {
+                            deviceDataBuffer[0] = 2;
+                            deviceDataLength = 1;
+                            qnode pushData = {deviceId, PUSH_MSG};
+                            push(pushData);
+                        }
                     }
                 }
 
+                if(bridgeMode && isCommand(&userData, "bind", 2))
+                {
+                    putsUart0("Binding ...\n");
+                    pair p = {getFieldInteger(&userData, 1), getFieldInteger(&userData, 2)};
+                    bindTable[bindIndex++] = p;
+                }
+
+                if(!bridgeMode && isCommand(&userData, "clearep", 0))
+                {
+                    putsUart0("Erasing EEPROM ...\n");
+                    writeEeprom(DEVICE_DATA_START, 0xFFFFFFFF);
+                }
             }
+        }
+
+        // Insert send functions
+        if(!bridgeMode && !isPressed && !getPinValue(USER_SWITCH2))
+        {
+            isPressed = true;
+            putsUart0("Push button pressed\n");
+            deviceDataBuffer[0] = 1;
+            deviceDataLength = 1;
+            qnode data = {getDeviceId(), PUSH_MSG};
+            push(data);
         }
 
         // Keep on polling for the push button press
         // If pressed, let the user join for a short period of time
-        if(joinNetwork())
+        if(joinNetwork() && joinPressed)
         {
             if(bridgeMode && accessSlot)
             {
@@ -272,31 +372,30 @@ void initNetwork()
                 putsUart0("Sending join request ...\n");
                 sendJoinRequest(packet, 0, getDeviceId());
             }
-            waitMicrosecond(1000000);
+            joinPressed = false;
         }
 
         if(rfIsDataAvailable())
         {
             uint32_t n = rfReceiveBuffer(packet);
-            sprintf(out, "Received %d byte(s) of data\n", n);
-            putsUart0(out);
 
             if(n > 0)
             {
-                switch(bridgeMode)
+                if(bridgeMode)
                 {
-                case true:
                     // Bridge receive section
                     if(letJoin)
                     {
                         if(isJoinRequest(packet))
                         {
-                            uint8_t newDeviceId = getNewDeviceId();
+                            uint8_t newDeviceId = getNewDeviceId(packet);
                             sprintf(out, "Received join request\nNew device id = %d\n", newDeviceId);
                             putsUart0(out);
+
                             if(!deviceExists(newDeviceId))
                             {
-                                addDevice(newDeviceId, deviceIndex);
+                                addDevice(newDeviceId, getDeviceIndex());
+                                incrementDeviceIndex();
                                 qnode joinResponse = {newDeviceId, JOIN_RESP};
                                 push(joinResponse);
                             }
@@ -309,40 +408,65 @@ void initNetwork()
 
                     if(isPingResponse(packet))
                     {
-                        putsUart0("Received ping response\n");
+                        sprintf(out, "Received ping response from device id = %d\n", getNewDeviceId(packet));
+                        putsUart0(out);
                     }
 
-                    if(packet[0] == 0x77)
+                    if(isPushData(packet, BRIDGE_ADDRESS))
+                        pushDataReceiveCallback(packet);
+
+                    // IMPORTANT: Nathan's parsing code goes here
+                    if(isDevCaps(packet, DEV_CAPS1))
                     {
+                        putsUart0("Received dev cap 1\n");
                         uint8_t i = 0;
-                        for(i = 1; i < n; i++)
+                        for(i = 0; i < 25; i++)
+                            devCapsData[i] = (packet + 7)[i];
+                    }
+
+                    if(isDevCaps(packet, DEV_CAPS2))
+                    {
+                        putsUart0("Received dev cap 2\n");
+                        uint8_t i = 0;
+                        for(i = 0; i < 31; i++)
+                            devCapsData[i + 25] = (packet + 2)[i];
+
+                        devCaps* dC = (devCaps*)devCapsData;
+                        sprintf(out, "Device name = %s, Attribute count = %d\n", dC->deviceName, dC->attributeCount);
+                        putsUart0(out);
+                        for(i = 0; i < dC->attributeCount; i++)
                         {
-                            sprintf(out, "Data[%d] = %x\n", i, packet[i]);
+                            sprintf(out, "%d. Attr = %s, Id = %d\n", (i + 1), dC->attributes[i].topicName, dC->attributes[i].id);
                             putsUart0(out);
                         }
                     }
-
-                    break;
-                case false:
+                }
+                else
+                {
                     // Device receive section
                     if(isSync(packet))
                     {
                         // Reset everything
                         timeIndex = 0;
+                        setPinValue(TX_LED, 0);
                         setTimerLoadValue(0);
                         startTimer0();
-#ifdef DEBUG
-                        putsUart0("Received sync\n");
-#endif
                     }
 
                     if(isJoinResponse(packet))
                     {
-                        putsUart0("Received a join response\n");
-                        currentDeviceTimeSlot = getTimeSlot();
-                        sprintf(out, "Time Slot = %d\n", currentDeviceTimeSlot);
+                        putsUart0("Received a join response\nWriting data to Eeprom ...\n");
+                        // setCurrentTimeSlot(getTimeSlot(packet));
+                        uint8_t timeSlotReceived = getTimeSlot(packet);
+                        writeDeviceMetaData(getDeviceId(), timeSlotReceived);
+                        setCurrentTimeSlot(timeSlotReceived);
+                        assignDeviceSlot();
+                        // Send all the device capabilities
+                        qnode initialDevCaps = {BRIDGE_ADDRESS, DEV_CAPS1};
+                        push(initialDevCaps);
+
+                        sprintf(out, "Device id = %d, Time Slot = %d\n", getDeviceId(), getCurrentTimeSlot());
                         putsUart0(out);
-                        slotAssigned = true;
                     }
 
                     if(isPingRequest(packet))
@@ -350,8 +474,11 @@ void initNetwork()
                         putsUart0("Received ping request\n");
                         qnode pingResponse = {getDeviceId(), PING_RESP};
                         push(pingResponse);
+                        receivedBridgeAddress = getNewDeviceId(packet);
                     }
-                    break;
+
+                    if(isPushData(packet, getDeviceId()))
+                        pushDataReceiveCallback(packet);
                 }
             }
         }

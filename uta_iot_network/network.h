@@ -11,7 +11,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define TX_LED              PORTF,1
+#define JOIN_LED            PORTF,2
+#define RX_LED              PORTF,3
+
 void initNetwork();
-void registerSendCallback(void (*s)(uint8_t*, uint8_t), uint8_t* data, uint8_t length);
+void commsReceive();
+void registerPushDataCallback(void (*callback)(uint8_t*));
+bool getMode();
 
 #endif /* NETWORK_H_ */
