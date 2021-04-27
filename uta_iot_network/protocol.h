@@ -19,6 +19,8 @@
 #include <stdbool.h>
 
 #define BRIDGE_ADDRESS      0x42
+#define MAX_DEVICE_NAME     4
+#define MAX_ATTRIBUTE_INFO  3
 
 //----------------------------
 // Protocol Enumerations
@@ -35,7 +37,7 @@ typedef enum _messageType
     CAPS_REQ = 0x05,
     CAPS_RESP = 0x06,
     PUSH_MSG = 0x07,
-    JOIN_ACK = 0x08
+    DEV_CAPS = 0x08
 
 } messageType;
 
@@ -55,6 +57,18 @@ typedef struct _packetHeader    // 7 bytes + Data bytes
     uint8_t data[0];
 } packetHeader;
 
+typedef struct _attribute
+{
+    uint8_t id;
+    char topicName[6];
+} attribute;
+
+typedef struct _devCaps
+{
+    char deviceName[MAX_DEVICE_NAME];
+    attribute attributes[MAX_ATTRIBUTE_INFO];
+} devCaps;
+
 //----------------------------
 // Protocol Functions
 //----------------------------
@@ -65,6 +79,8 @@ void sendJoinRequest(uint8_t* buffer, uint8_t nBytes, uint8_t deviceId);
 bool isJoinRequest(uint8_t* buffer);
 void sendJoinResponse(uint8_t* buffer, uint8_t nBytes, uint8_t id, uint8_t slotNumber);
 bool isJoinResponse(uint8_t* buffer);
+void sendDevCaps(uint8_t* buffer, char* deviceName, uint8_t attributeId[], char* topicName[]);
+bool isDevCap(uint8_t* buffer);
 void sendPingRequest(uint8_t* buffer, uint8_t deviceId);
 bool isPingRequest(uint8_t* buffer);
 void sendPingResponse(uint8_t* buffer, uint8_t id, uint8_t deviceId);

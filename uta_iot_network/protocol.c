@@ -15,6 +15,7 @@
 #include "nrf24l01.h"
 #include "protocol.h"
 #include "device.h"
+#include "common_terminal_interface.h"
 
 #define PREAMBLE            0xAA
 
@@ -79,6 +80,41 @@ bool isJoinResponse(uint8_t* buffer)
 {
     packetHeader* pH = (packetHeader*)buffer;
     if(pH->preamble == PREAMBLE && pH->to == getDeviceId() && pH->messageType == (uint8_t)JOIN_RESP)
+        return true;
+    return false;
+}
+
+void assembleDevCaps(uint8_t* buffer, char deviceName, uint8_t attrCount, uint8_t attribute, char topicName)
+{
+}
+
+void sendDevCaps(uint8_t* buffer, char* deviceName, uint8_t attributeId[], char* topicName[])
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    pH->preamble = PREAMBLE;
+    pH->from = getDeviceId();
+    pH->to = BRIDGE_ADDRESS;
+    pH->messageType = (uint8_t)DEV_CAPS;
+    pH->length = sizeof(devCaps);
+    pH->checksum = 0;
+
+    devCaps* data = (devCaps*)(buffer + 7);
+    strCpy(deviceName, data->deviceName);
+
+    uint8_t i = 0;
+    for(i = 0; i < 3; i++)
+    {
+        data->attributes[i].id = attributeId[i];
+        strCpy(topicName[i], data->attributes[i].topicName);
+    }
+
+    rfSendBuffer((uint8_t*)pH, 32);
+}
+
+bool isDevCap(uint8_t* buffer)
+{
+    packetHeader* pH = (packetHeader*)buffer;
+    if(pH->preamble == PREAMBLE && pH->to == BRIDGE_ADDRESS && pH->messageType == (uint8_t)DEV_CAPS)
         return true;
     return false;
 }

@@ -20,6 +20,7 @@
 #include "device.h"
 #include "common_terminal_interface.h"
 #include "messageQueue.h"
+#include "eeprom.h"
 
 #define DEBUG
 
@@ -27,7 +28,7 @@
     #include <stdio.h>
 #endif
 
-#define MAX_PACKET_SIZE     20
+#define MAX_PACKET_SIZE     128
 
 #define NETWORK_ADDRESS     0xACCE55
 
@@ -42,10 +43,14 @@ bool accessSlot = false;
 bool joinPressed = false;
 bool letJoin = false;
 
-bool bridgeMode = true;
+bool bridgeMode = false;
 
 // This buffer will be the TX and RX buffer
 uint8_t packet[MAX_PACKET_SIZE];
+
+uint8_t devCapsData[MAX_PACKET_SIZE];
+uint8_t dataReceivedIndex = 0;
+
 uint8_t receivedBridgeAddress = 0;
 
 uint8_t deviceDataBuffer[MAX_PACKET_SIZE];
@@ -56,9 +61,13 @@ void (*pushDataReceiveCallback)(uint8_t*);
 
 // Temporary variables
 // These will be removed later
-char out[50];
+char out[MAX_PACKET_SIZE];
 pair bindTable[MAX_DEVICES];
 uint8_t bindIndex = 0;
+
+char deviceName[] = "wea";
+char* topicNames[] = {"temp", "humid", "press"};
+uint8_t topicIds[] = {0x01, 0x02, 0x03};
 
 /*
  * Private functions
@@ -171,6 +180,10 @@ void timer0Isr()
                 pushData(packet, deviceDataBuffer, message.id, BRIDGE_ADDRESS, deviceDataLength);
                 isPressed = false;
                 break;
+            case DEV_CAPS:
+                putsUart0("Sending initial device capabilities ...\n");
+                sendDevCaps(packet, deviceName, topicIds, topicNames);
+                break;
             }
         }
     }
@@ -215,6 +228,8 @@ void registerPushDataCallback(void (*callback)(uint8_t*))
 {
     pushDataReceiveCallback = callback;
 }
+
+void tmp(uint8_t* packet) {}
 
 bool getMode()
 {
@@ -299,11 +314,17 @@ void commsReceive()
                     }
                 }
 
-                if(isCommand(&userData, "bind", 2))
+                if(bridgeMode && isCommand(&userData, "bind", 2))
                 {
                     putsUart0("Binding ...\n");
                     pair p = {getFieldInteger(&userData, 1), getFieldInteger(&userData, 2)};
                     bindTable[bindIndex++] = p;
+                }
+
+                if(!bridgeMode && isCommand(&userData, "clearep", 0))
+                {
+                    putsUart0("Erasing EEPROM ...\n");
+                    writeEeprom(DEVICE_DATA_START, 0xFFFFFFFF);
                 }
             }
         }
@@ -329,7 +350,7 @@ void commsReceive()
                 letJoin = true;
                 setPinValue(JOIN_LED, 1);
             }
-            else if(!deviceSlotIsAssigned())
+            else
             {
                 putsUart0("Sending join request ...\n");
                 sendJoinRequest(packet, 0, getDeviceId());
@@ -376,6 +397,20 @@ void commsReceive()
 
                     if(isPushData(packet, BRIDGE_ADDRESS))
                         pushDataReceiveCallback(packet);
+
+                    // IMPORTANT: Nathan's parsing code goes here
+                    if(isDevCap(packet))
+                    {
+                        devCaps* dC = (devCaps*)(packet + 7);
+                        sprintf(out, "Device name = %s\n", dC->deviceName);
+                        putsUart0(out);
+                        uint8_t i = 0;
+                        for(i = 0; i < 3; i++)
+                        {
+                            sprintf(out, "%d. Attribute Id = %d, Topic Name = %s\n", i, dC->attributes[i].id, dC->attributes[i].topicName);
+                            putsUart0(out);
+                        }
+                    }
                 }
                 else
                 {
@@ -391,11 +426,18 @@ void commsReceive()
 
                     if(isJoinResponse(packet))
                     {
-                        putsUart0("Received a join response\n");
-                        setCurrentTimeSlot(getTimeSlot(packet));
-                        sprintf(out, "Time Slot = %d\n", getCurrentTimeSlot());
-                        putsUart0(out);
+                        putsUart0("Received a join response\nWriting data to Eeprom ...\n");
+                        // setCurrentTimeSlot(getTimeSlot(packet));
+                        uint8_t timeSlotReceived = getTimeSlot(packet);
+                        writeDeviceMetaData(getDeviceId(), timeSlotReceived);
+                        setCurrentTimeSlot(timeSlotReceived);
                         assignDeviceSlot();
+                        // Send all the device capabilities
+                        qnode initialDevCaps = {BRIDGE_ADDRESS, DEV_CAPS};
+                        push(initialDevCaps);
+
+                        sprintf(out, "Device id = %d, Time Slot = %d\n", getDeviceId(), getCurrentTimeSlot());
+                        putsUart0(out);
                     }
 
                     if(isPingRequest(packet))
