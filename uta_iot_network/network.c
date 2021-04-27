@@ -47,9 +47,11 @@ bool bridgeMode = false;
 
 // This buffer will be the TX and RX buffer
 uint8_t packet[MAX_PACKET_SIZE];
+uint8_t globalOffset = 0;
 
 uint8_t devCapsData[MAX_PACKET_SIZE];
 uint8_t dataReceivedIndex = 0;
+bool receivedDevCap = false;
 
 uint8_t receivedBridgeAddress = 0;
 
@@ -65,9 +67,8 @@ char out[MAX_PACKET_SIZE];
 pair bindTable[MAX_DEVICES];
 uint8_t bindIndex = 0;
 
-char deviceName[] = "wea";
-char* topicNames[] = {"temp", "humid", "press"};
-uint8_t topicIds[] = {0x01, 0x02, 0x03};
+char* topicNames[10] = {"led"};
+uint8_t topicIds[] = {0x02};
 
 /*
  * Private functions
@@ -180,9 +181,15 @@ void timer0Isr()
                 pushData(packet, deviceDataBuffer, message.id, BRIDGE_ADDRESS, deviceDataLength);
                 isPressed = false;
                 break;
-            case DEV_CAPS:
-                putsUart0("Sending initial device capabilities ...\n");
-                sendDevCaps(packet, deviceName, topicIds, topicNames);
+            case DEV_CAPS1:
+                putsUart0("Sending dev cap 1 ...\n");
+                sendDevCaps(packet, devCapsData, DEV_CAPS1);
+                qnode devCaps2 = {BRIDGE_ADDRESS, DEV_CAPS2};
+                push(devCaps2);
+                break;
+            case DEV_CAPS2:
+                putsUart0("Sending dev cap 2 ...\n");
+                sendDevCaps(packet, devCapsData, DEV_CAPS2);
                 break;
             }
         }
@@ -262,6 +269,7 @@ void initNetwork()
     }
     else
     {
+        assembleDevCaps(devCapsData, "Bulb", 1, topicIds, topicNames);
         putsUart0("RX Mode\n");
         rfSetMode(RX);
     }
@@ -334,6 +342,7 @@ void commsReceive()
         {
             isPressed = true;
             putsUart0("Push button pressed\n");
+
             deviceDataBuffer[0] = 1;
             deviceDataLength = 1;
             qnode data = {getDeviceId(), PUSH_MSG};
@@ -399,15 +408,27 @@ void commsReceive()
                         pushDataReceiveCallback(packet);
 
                     // IMPORTANT: Nathan's parsing code goes here
-                    if(isDevCap(packet))
+                    if(isDevCaps(packet, DEV_CAPS1))
                     {
-                        devCaps* dC = (devCaps*)(packet + 7);
-                        sprintf(out, "Device name = %s\n", dC->deviceName);
-                        putsUart0(out);
+                        putsUart0("Received dev cap 1\n");
                         uint8_t i = 0;
-                        for(i = 0; i < 3; i++)
+                        for(i = 0; i < 25; i++)
+                            devCapsData[i] = (packet + 7)[i];
+                    }
+
+                    if(isDevCaps(packet, DEV_CAPS2))
+                    {
+                        putsUart0("Received dev cap 2\n");
+                        uint8_t i = 0;
+                        for(i = 0; i < 31; i++)
+                            devCapsData[i + 25] = (packet + 2)[i];
+
+                        devCaps* dC = (devCaps*)devCapsData;
+                        sprintf(out, "Device name = %s, Attribute count = %d\n", dC->deviceName, dC->attributeCount);
+                        putsUart0(out);
+                        for(i = 0; i < dC->attributeCount; i++)
                         {
-                            sprintf(out, "%d. Attribute Id = %d, Topic Name = %s\n", i, dC->attributes[i].id, dC->attributes[i].topicName);
+                            sprintf(out, "%d. Attr = %s, Id = %d\n", (i + 1), dC->attributes[i].topicName, dC->attributes[i].id);
                             putsUart0(out);
                         }
                     }
@@ -433,7 +454,7 @@ void commsReceive()
                         setCurrentTimeSlot(timeSlotReceived);
                         assignDeviceSlot();
                         // Send all the device capabilities
-                        qnode initialDevCaps = {BRIDGE_ADDRESS, DEV_CAPS};
+                        qnode initialDevCaps = {BRIDGE_ADDRESS, DEV_CAPS1};
                         push(initialDevCaps);
 
                         sprintf(out, "Device id = %d, Time Slot = %d\n", getDeviceId(), getCurrentTimeSlot());

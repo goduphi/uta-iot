@@ -84,37 +84,58 @@ bool isJoinResponse(uint8_t* buffer)
     return false;
 }
 
-void assembleDevCaps(uint8_t* buffer, char deviceName, uint8_t attrCount, uint8_t attribute, char topicName)
+void assembleDevCaps(uint8_t* buffer, char* deviceName, uint8_t attributeCount, uint8_t attributeId[], char* topicNames[])
 {
+    devCaps* dC = (devCaps*)buffer;
+    strCpy(deviceName, dC->deviceName);
+    dC->attributeCount = attributeCount;
+    uint8_t i = 0;
+    for(i = 0; i < attributeCount; i++)
+    {
+        dC->attributes[i].id = attributeId[i];
+        strCpy(topicNames[i], dC->attributes[i].topicName);
+    }
 }
 
-void sendDevCaps(uint8_t* buffer, char* deviceName, uint8_t attributeId[], char* topicName[])
+void sendDevCaps(uint8_t* buffer, uint8_t* devCapBuffer, messageType m)
 {
-    packetHeader* pH = (packetHeader*)buffer;
-    pH->preamble = PREAMBLE;
-    pH->from = getDeviceId();
-    pH->to = BRIDGE_ADDRESS;
-    pH->messageType = (uint8_t)DEV_CAPS;
-    pH->length = sizeof(devCaps);
-    pH->checksum = 0;
-
-    devCaps* data = (devCaps*)(buffer + 7);
-    strCpy(deviceName, data->deviceName);
-
-    uint8_t i = 0;
-    for(i = 0; i < 3; i++)
+    if(m == DEV_CAPS1)
     {
-        data->attributes[i].id = attributeId[i];
-        strCpy(topicName[i], data->attributes[i].topicName);
+        packetHeader* pH = (packetHeader*)buffer;
+        pH->preamble = PREAMBLE;
+        pH->from = getDeviceId();
+        pH->to = BRIDGE_ADDRESS;
+        pH->messageType = (uint8_t)m;
+        pH->length = 0;
+        pH->checksum = 0;
+
+        uint8_t i = 0;
+        for(i = 0; i < 25; i++)
+            (buffer + 7)[i] = devCapBuffer[i];
+
+        // Put the first part of the data here
+    }
+    else if(m == DEV_CAPS2)
+    {
+        buffer[0] = PREAMBLE;
+        buffer[1] = (uint8_t)m;
+
+        uint8_t i = 0;
+        for(i = 2; i < 33; i++)
+            buffer[i] = devCapBuffer[(i - 2) + 25];
+
+        // Put the second part of the data here
     }
 
-    rfSendBuffer((uint8_t*)pH, 32);
+    rfSendBuffer(buffer, 32);
 }
 
-bool isDevCap(uint8_t* buffer)
+bool isDevCaps(uint8_t* buffer, messageType m)
 {
     packetHeader* pH = (packetHeader*)buffer;
-    if(pH->preamble == PREAMBLE && pH->to == BRIDGE_ADDRESS && pH->messageType == (uint8_t)DEV_CAPS)
+    if(m == DEV_CAPS1 && pH->preamble == PREAMBLE && pH->to == BRIDGE_ADDRESS)
+        return true;
+    if(m == DEV_CAPS2 && pH->preamble == PREAMBLE && buffer[1] == (uint8_t)DEV_CAPS2)
         return true;
     return false;
 }

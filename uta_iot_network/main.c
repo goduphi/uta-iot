@@ -22,6 +22,7 @@ void receiveData(uint8_t* buffer)
 {
     putsUart0("Turning on led ...\n");
     uint8_t* data = (buffer + 7);
+
     if(data[0] == 1)
         setPinValue(JOIN_LED, 1);
 }
@@ -32,7 +33,7 @@ void initCurrentDevice()
     if(deviceMetaData == 0xFFFFFFFF)
     {
         // The device id will be a range from 0 - MAX_DEVICES
-        setDeviceId(1);
+        setDeviceId(2);
     }
     else
     {
@@ -63,5 +64,7 @@ int main(void)
     while(true)
     {
         commsReceive();
+
+
     }
 }
